@@ -6,9 +6,6 @@ const app = createApp({
     const currentSubject = ref('');
     const currentQuestion = ref(null);
     
-    // 文件夹句柄
-    const dirHandle = ref(null);
-    
     // 持久化数据
     const userEdits = reactive(JSON.parse(localStorage.getItem('userEdits') || '{}'));
     const userProgress = reactive(JSON.parse(localStorage.getItem('userProgress') || '{}'));
@@ -41,100 +38,86 @@ const app = createApp({
       }
     });
     
-    // 保存数据到本地文件和 localStorage
-    const saveData = async () => {
-      // 始终保存到 localStorage 作为备份
+    // 保存数据到 localStorage
+    const saveData = () => {
       localStorage.setItem('userEdits', JSON.stringify(userEdits));
       localStorage.setItem('userProgress', JSON.stringify(userProgress));
       localStorage.setItem('userNotes', JSON.stringify(userNotes));
       localStorage.setItem('userPractice', JSON.stringify(userPractice));
       localStorage.setItem('userAddedData', JSON.stringify(userAddedData));
-      
-      // 如果选择了本地文件夹，则保存到文件
-      if (dirHandle.value) {
-        try {
-          const writeToFile = async (filename, data) => {
-            const fileHandle = await dirHandle.value.getFileHandle(filename, { create: true });
-            const writable = await fileHandle.createWritable();
-            await writable.write(JSON.stringify(data, null, 2));
-            await writable.close();
-          };
-          
-          await writeToFile('questions.json', { userAddedData, userEdits });
-          await writeToFile('progress.json', userProgress);
-          await writeToFile('notes.json', { userNotes, userPractice });
-        } catch (error) {
-          console.error('保存到本地文件失败:', error);
-          if (error.name === 'InvalidStateError' || error.name === 'NotAllowedError') {
-            ElementPlus.ElMessage.error('本地文件夹连接已断开或失效，请重新选择文件夹');
-            dirHandle.value = null;
-          } else {
-            ElementPlus.ElMessage.error('保存到本地文件失败，请检查权限');
-          }
-        }
-      }
     };
     
-    // 选择本地文件夹
-    const selectFolder = async () => {
-      try {
-        dirHandle.value = await window.showDirectoryPicker({
-          mode: 'readwrite'
-        });
+    // 导出备份
+    const exportBackup = () => {
+      const backupData = {
+        userEdits,
+        userProgress,
+        userNotes,
+        userPractice,
+        userAddedData
+      };
+      
+      const dataStr = JSON.stringify(backupData, null, 2);
+      const blob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `recite_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      ElementPlus.ElMessage.success('备份已导出');
+    };
+
+    // 导入备份
+    const importBackup = () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.json';
+      
+      input.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
         
-        // 尝试读取已有的数据文件
-        const readFromFile = async (filename) => {
+        const reader = new FileReader();
+        reader.onload = (event) => {
           try {
-            const fileHandle = await dirHandle.value.getFileHandle(filename);
-            const file = await fileHandle.getFile();
-            const text = await file.text();
-            return JSON.parse(text);
-          } catch (e) {
-            return null; // 文件不存在或解析失败
+            const data = JSON.parse(event.target.result);
+            
+            if (data.userAddedData) Object.assign(userAddedData, data.userAddedData);
+            if (data.userEdits) Object.assign(userEdits, data.userEdits);
+            if (data.userProgress) Object.assign(userProgress, data.userProgress);
+            if (data.userNotes) Object.assign(userNotes, data.userNotes);
+            if (data.userPractice) Object.assign(userPractice, data.userPractice);
+            
+            // 刷新科目列表
+            const addedSubs = Object.keys(userAddedData);
+            const baseSubs = Object.keys(window.myData);
+            subjects.value = [...new Set([...baseSubs, ...addedSubs])];
+            
+            saveData();
+            ElementPlus.ElMessage.success('备份导入成功');
+            
+            // 重新选择当前科目以刷新列表
+            if (currentSubject.value) {
+              const temp = currentSubject.value;
+              currentSubject.value = '';
+              setTimeout(() => selectSubject(temp), 10);
+            } else if (subjects.value.length > 0) {
+              selectSubject(subjects.value[0]);
+            }
+          } catch (error) {
+            console.error('导入失败:', error);
+            ElementPlus.ElMessage.error('导入失败，请检查文件格式是否正确');
           }
         };
-        
-        const questionsData = await readFromFile('questions.json');
-        if (questionsData) {
-          Object.assign(userAddedData, questionsData.userAddedData || {});
-          Object.assign(userEdits, questionsData.userEdits || {});
-        }
-        
-        const progressData = await readFromFile('progress.json');
-        if (progressData) {
-          Object.assign(userProgress, progressData);
-        }
-        
-        const notesData = await readFromFile('notes.json');
-        if (notesData) {
-          Object.assign(userNotes, notesData.userNotes || {});
-          Object.assign(userPractice, notesData.userPractice || {});
-        }
-        
-        // 读取后保存一次，确保 localStorage 同步
-        saveData();
-        
-        ElementPlus.ElMessage.success('成功连接本地文件夹并加载数据');
-        
-        // 重新选择当前科目以刷新列表
-        if (currentSubject.value) {
-          const temp = currentSubject.value;
-          currentSubject.value = '';
-          setTimeout(() => selectSubject(temp), 10);
-        }
-      } catch (error) {
-        if (error.name !== 'AbortError') {
-          console.error('选择文件夹失败:', error);
-          if (error.name === 'SecurityError') {
-            ElementPlus.ElMessage.error({
-              message: '预览窗口不支持本地文件夹，请点击右上角「在新标签页中打开」使用此功能',
-              duration: 5000
-            });
-          } else {
-            ElementPlus.ElMessage.error('选择文件夹失败: ' + error.message);
-          }
-        }
-      }
+        reader.readAsText(file);
+      };
+      
+      input.click();
     };
 
     // 合并题库与用户修改
@@ -507,9 +490,9 @@ const app = createApp({
       currentNote,
       showAddModal,
       batchText,
-      dirHandle,
       
-      selectFolder,
+      importBackup,
+      exportBackup,
       selectSubject,
       selectQuestion,
       addSubject,

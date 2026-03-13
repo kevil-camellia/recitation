@@ -25,9 +25,13 @@
         </div>
       </transition-group>
       
-      <div class="action-btn-sidebar mt-auto" @click="selectFolder">
-        <el-icon><folder-opened></folder-opened></el-icon> 
-        <span style="font-size: 11px;">{{ dirHandle ? '已连接文件夹' : '选择数据文件夹' }}</span>
+      <div class="action-btn-sidebar mt-auto" @click="importBackup">
+        <el-icon><upload></upload></el-icon> 
+        <span style="font-size: 11px;">导入题目 (JSON)</span>
+      </div>
+      <div class="action-btn-sidebar" @click="exportBackup" style="margin-top: 8px;">
+        <el-icon><download></download></el-icon> 
+        <span style="font-size: 11px;">导出备份</span>
       </div>
       <div class="action-btn-sidebar" @click="addSubject" style="margin-top: 8px;">
         <el-icon><plus></plus></el-icon> <span style="font-size: 11px;">添加科目</span>

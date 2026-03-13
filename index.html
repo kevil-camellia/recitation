@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>背书练习</title>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 左侧科目栏 -->
+    <div class="sidebar">
+      <transition-group name="list" tag="div">
+        <div 
+          v-for="sub in subjects" 
+          :key="sub"
+          class="subject-item"
+          :class="{ active: currentSubject === sub }"
+          @click="selectSubject(sub)"
+        >
+          <div>{{ sub }}</div>
+          <div class="subject-progress" v-if="subjectProgress[sub]">
+            {{ subjectProgress[sub].finished }}/{{ subjectProgress[sub].total }}
+          </div>
+        </div>
+      </transition-group>
+      
+      <div class="action-btn-sidebar mt-auto" @click="selectFolder">
+        <el-icon><folder-opened></folder-opened></el-icon> 
+        <span style="font-size: 11px;">{{ dirHandle ? '已连接文件夹' : '选择数据文件夹' }}</span>
+      </div>
+      <div class="action-btn-sidebar" @click="addSubject" style="margin-top: 8px;">
+        <el-icon><plus></plus></el-icon> <span style="font-size: 11px;">添加科目</span>
+      </div>
+    </div>
+
+    <!-- 中间题目列表 -->
+    <div class="list-panel">
+      <div class="list-header">
+        <el-input
+          v-model="searchText"
+          placeholder="搜索题目/答案/备注"
+          clearable
+          size="small"
+          prefix-icon="Search"
+          style="margin-bottom: 12px;"
+        ></el-input>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <el-switch v-model="showOnlyWrong" active-text="只看错题" size="small"></el-switch>
+          <span style="font-size: 12px; color: var(--text-muted);">共 {{ filteredQuestions.length }} 题</span>
+        </div>
+        <el-button type="primary" plain size="small" style="width: 100%;" @click="showAddModal = true">
+          <el-icon><plus></plus></el-icon> 添加题目
+        </el-button>
+      </div>
+      <div class="list-content">
+        <transition-group name="list" tag="div">
+          <div 
+            v-for="(q, index) in filteredQuestions" 
+            :key="q.id"
+            class="question-item"
+            :class="{ active: currentQuestion && currentQuestion.id === q.id }"
+            @click="selectQuestion(q)"
+          >
+            <span class="q-id">{{ index + 1 }}</span>
+            <span class="q-text" :title="q.q">{{ q.q }}</span>
+            <div class="q-tags">
+              <span v-if="q.progress.reviewCount > 0" class="review-badge">{{ q.progress.reviewCount }}次</span>
+              <span v-if="q.progress.mastery" class="tag-dot" :class="getMasteryClass(q.progress.mastery)" :title="q.progress.mastery"></span>
+              <span v-if="q.progress.wrong" class="tag-dot wrong" title="错题"></span>
+              <span v-if="q.progress.finished" class="tag-dot finished" title="已完成"></span>
+            </div>
+          </div>
+        </transition-group>
+      </div>
+    </div>
+
+    <!-- 右侧背书区 -->
+    <div class="main-panel">
+      <div class="toolbar">
+        <el-button class="btn-gradient" size="small" @click="randomCurrent">随机当前科目</el-button>
+        <el-button class="btn-gradient" size="small" @click="randomWrong">随机错题</el-button>
+        <el-button class="btn-gradient" size="small" @click="randomAll">全科随机</el-button>
+      </div>
+
+      <transition name="fade-slide" mode="out-in">
+        <div v-if="currentQuestion" :key="currentQuestion.id" class="main-card">
+          <div class="card-header">
+            <span class="question-title">{{ currentQuestion.q }}</span>
+            <div style="display: flex; gap: 8px; flex-shrink: 0; align-items: center;">
+              <div v-if="!isEditing" style="display: flex; align-items: center; gap: 8px; margin-right: 8px;">
+                <span style="font-size: 13px; color: var(--text-muted);">背书次数：</span>
+                <el-input-number 
+                  :model-value="currentQuestion.progress.reviewCount || 0" 
+                  @change="updateReviewCount" 
+                  size="small" 
+                  :min="0" 
+                  controls-position="right" 
+                  style="width: 90px;">
+                </el-input-number>
+              </div>
+              <el-button type="success" size="small" plain @click="incrementReviewCount" v-if="!isEditing">
+                <el-icon><check></check></el-icon> 背过一次
+              </el-button>
+              <el-button type="danger" size="small" :plain="!currentQuestion.progress.wrong" @click="toggleWrong" v-if="!isEditing">
+                {{ currentQuestion.progress.wrong ? '取消错题' : '标记错题' }}
+              </el-button>
+              <el-button size="small" plain @click="startEdit" v-if="!isEditing">修改</el-button>
+              <el-button type="danger" size="small" plain @click="deleteQuestion" v-if="!isEditing">删除</el-button>
+            </div>
+          </div>
+
+          <div class="card-body">
+            <transition name="fade-slide" mode="out-in">
+              <div v-if="isEditing" class="edit-form" key="editing">
+                <el-form label-width="60px">
+                  <el-form-item label="题目">
+                    <el-input v-model="editForm.q" type="textarea" :rows="2"></el-input>
+                  </el-form-item>
+                  <el-form-item label="答案">
+                    <el-input v-model="editForm.a" type="textarea" :rows="4"></el-input>
+                  </el-form-item>
+                  <el-form-item label="备注">
+                    <el-input v-model="editForm.note" type="textarea" :rows="2"></el-input>
+                  </el-form-item>
+                  <el-form-item>
+                    <el-button type="primary" @click="saveEdit">保存</el-button>
+                    <el-button @click="cancelEdit">取消</el-button>
+                  </el-form-item>
+                </el-form>
+              </div>
+
+              <div v-else key="viewing">
+                <el-row :gutter="24">
+                  <el-col :span="12">
+                    <h4 style="margin-top: 0; color: var(--text-muted); font-weight: 500; font-size: 14px;">练习区 (自动保存)</h4>
+                    <el-input
+                      v-model="currentPractice"
+                      type="textarea"
+                      :rows="8"
+                      placeholder="在此默写答案..."
+                      resize="none"
+                    ></el-input>
+                  </el-col>
+                  <el-col :span="12">
+                    <h4 style="margin-top: 0; color: var(--text-muted); font-weight: 500; font-size: 14px;">我的笔记</h4>
+                    <el-input
+                      v-model="currentNote"
+                      type="textarea"
+                      :rows="8"
+                      placeholder="记录一些助记技巧..."
+                      resize="none"
+                    ></el-input>
+                  </el-col>
+                </el-row>
+
+                <div style="margin-top: 24px; display: flex; align-items: center; gap: 16px;">
+                  <el-button type="primary" plain @click="showAnswer = !showAnswer">
+                    {{ showAnswer ? '隐藏答案' : '查看答案' }}
+                  </el-button>
+                  
+                  <el-radio-group v-model="currentQuestion.progress.mastery" @change="setMastery" size="small">
+                    <el-radio-button label="不会" value="不会"></el-radio-button>
+                    <el-radio-button label="不熟悉" value="不熟悉"></el-radio-button>
+                    <el-radio-button label="熟悉" value="熟悉"></el-radio-button>
+                  </el-radio-group>
+                </div>
+
+                <transition name="expand">
+                  <div v-if="showAnswer" class="answer-section">
+                    <div style="white-space: pre-wrap; font-size: 15px; line-height: 1.6;">{{ currentQuestion.a }}</div>
+                    <div v-if="currentQuestion.note" style="margin-top: 16px; color: var(--text-muted); font-size: 13px; border-top: 1px solid var(--border-color); padding-top: 12px;">
+                      <strong>备注：</strong>{{ currentQuestion.note }}
+                    </div>
+                  </div>
+                </transition>
+              </div>
+            </transition>
+          </div>
+        </div>
+        
+        <el-empty v-else description="请选择或添加题目" key="empty"></el-empty>
+      </transition>
+    </div>
+
+    <!-- 批量添加题目弹窗 -->
+    <el-dialog v-model="showAddModal" title="批量添加题目" width="50%" destroy-on-close>
+      <div style="margin-bottom: 15px; color: var(--text-muted); font-size: 13px; line-height: 1.5;">
+        请按照以下格式输入（支持一次添加多题）：<br>
+        <span style="color: var(--text-main); font-family: monospace;">
+        问题：OSI七层模型有哪些？<br>
+        答案：物理层、数据链路层...<br>
+        问题：什么是闭包？<br>
+        答案：闭包是指...
+        </span>
+      </div>
+      <el-input 
+        type="textarea" 
+        v-model="batchText" 
+        :rows="12" 
+        placeholder="问题：...\n答案：..."
+      ></el-input>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="showAddModal = false">取消</el-button>
+          <el-button type="primary" @click="confirmAddQuestions">确认添加</el-button>
+        </span>
+      </template>
+    </el-dialog>
+  </div>
+
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <script src="https://unpkg.com/element-plus"></script>
+  <script src="https://unpkg.com/@element-plus/icons-vue"></script>
+  <script src="/data.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
+
